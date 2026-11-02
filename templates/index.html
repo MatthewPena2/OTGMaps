@@ -4,48 +4,569 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interactive Map App</title>
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
-        }
-        #map {
-            width: 100%;
-            height: 100vh;
+        html, body { margin: 0; padding: 0; height: 100%; width: 100%; font-family: system-ui, sans-serif; }
+        #map { width: calc(100% - 340px); height: 100vh; }
+        #search-panel { position: absolute; z-index: 1000; top: 0; right: 0; box-sizing: border-box; width: 340px; height: 100vh; padding: 24px 20px; background: #fff; box-shadow: -2px 0 12px #0002; }
+        #search-panel h1 { margin: 0 0 8px; font-size: 20px; }
+        #sidebar-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+        #sidebar-tabs button { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 6px; background: white; font: inherit; cursor: pointer; }
+        #sidebar-tabs button[aria-selected="true"] { border-color: #1769e0; background: #eaf2ff; color: #1457b8; font-weight: 600; }
+        .sidebar-view[hidden] { display: none; }
+        #search-panel p { margin: 0 0 18px; color: #555; font-size: 14px; line-height: 1.45; }
+        #address-form { display: flex; flex-direction: column; gap: 10px; }
+        #address { box-sizing: border-box; width: 100%; padding: 11px 12px; border: 1px solid #bbb; border-radius: 6px; font: inherit; }
+        #search-button { padding: 11px 14px; border: 0; border-radius: 6px; background: #1769e0; color: white; font: inherit; font-weight: 600; cursor: pointer; }
+        #search-button:disabled { opacity: .65; cursor: wait; }
+        #search-message { min-height: 42px; margin-top: 12px !important; }
+        #start-address { box-sizing: border-box; width: 100%; padding: 11px 12px; border: 1px solid #bbb; border-radius: 6px; font: inherit; }
+        #find-button { margin-top: 10px; padding: 11px 14px; border: 0; border-radius: 6px; background: #16804a; color: white; font: inherit; font-weight: 600; cursor: pointer; }
+        #find-button:disabled { opacity: .65; cursor: wait; }
+        #directions-message { min-height: 42px; margin-top: 12px !important; }
+        #status { position: absolute; z-index: 1000; top: 12px; left: 12px; max-width: calc(100% - 390px); padding: 10px 14px; border-radius: 8px; background: white; box-shadow: 0 2px 10px #0003; }
+        #route-info { display: none; position: absolute; z-index: 1100; top: 12px; left: calc((100% - 340px) / 2); transform: translateX(-50%); min-width: 240px; max-width: calc(100% - 390px); box-sizing: border-box; padding: 12px 42px 12px 16px; border-radius: 8px; background: white; box-shadow: 0 2px 12px #0004; text-align: center; }
+        #route-info-close { position: absolute; top: 5px; right: 8px; border: 0; background: transparent; color: #444; font-size: 24px; line-height: 1; cursor: pointer; }
+        .destination-pin { background: transparent; border: 0; }
+        .destination-pin svg { display: block; width: 28px; height: 38px; }
+        #use-location-button { margin-top: 10px; padding: 9px 12px; border: 1px solid #666; border-radius: 6px; background: white; color: #333; font: inherit; cursor: pointer; }
+        #use-location-button:disabled { opacity: .65; cursor: wait; }
+        #route-steps { box-sizing: border-box; max-height: calc(100vh - 360px); min-height: 0; margin: 16px 0 0; padding: 0 8px 0 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; border-top: 1px solid #e5e5e5; }
+        #route-steps li { padding: 12px 4px; border-bottom: 1px solid #e5e5e5; line-height: 1.4; }
+        #route-steps li span { display: block; margin-top: 4px; color: #666; font-size: 13px; }
+        @media (max-width: 700px) {
+            #map { width: 100%; height: 62vh; }
+            #search-panel { top: 62vh; width: 100%; height: 38vh; padding: 14px 16px; overflow-y: auto; box-shadow: 0 -2px 12px #0002; }
+            #search-panel p { margin-bottom: 10px; }
+            #status { top: 10px; left: 10px; max-width: calc(100% - 40px); }
+            #route-info { top: 54px; left: 50%; max-width: calc(100% - 24px); }
+            #route-steps { max-height: calc(38vh - 210px); }
         }
     </style>
 </head>
 <body>
-
+    <div id="status" role="status" aria-live="polite">Click the map to choose a starting point.</div>
+    <div id="route-info" role="status" aria-live="polite">
+        <button id="route-info-close" type="button" aria-label="Close route and remove it">&times;</button>
+        <strong id="route-summary"></strong>
+    </div>
     <div id="map"></div>
 
-    <!-- Leaflet JavaScript -->
+    <aside id="search-panel" aria-label="Map search and directions">
+        <nav id="sidebar-tabs" role="tablist" aria-label="Map tools">
+            <button id="search-tab-button" type="button" role="tab" aria-controls="search-view" aria-selected="true">Search</button>
+            <button id="directions-tab-button" type="button" role="tab" aria-controls="directions-view" aria-selected="false">Directions</button>
+        </nav>
+
+        <section id="search-view" class="sidebar-view" role="tabpanel" aria-labelledby="search-tab-button">
+            <h1>Find an address</h1>
+            <p>Search for a place to show it on the map. You can also click two points on the map to get a driving route.</p>
+            <form id="address-form">
+                <label for="address">Address</label>
+                <input id="address" name="address" type="search" placeholder="e.g. 1600 Pennsylvania Ave NW, Washington, DC" required>
+                <button id="search-button" type="submit">Search</button>
+            </form>
+            <p id="search-message" role="status" aria-live="polite"></p>
+            <button id="directions-button" type="button" hidden>Directions</button>
+        </section>
+
+        <section id="directions-view" class="sidebar-view" role="tabpanel" aria-labelledby="directions-tab-button" hidden>
+            <h1 id="directions-title">Directions</h1>
+            <form id="directions-form">
+                <label for="start-address">Starting location</label>
+                <input id="start-address" name="start-address" type="text" placeholder="Enter a starting address" autocomplete="street-address" required>
+                <button id="use-location-button" type="button">Use my location</button>
+                <button id="find-button" type="submit">Find</button>
+            </form>
+            <p id="directions-message" role="status" aria-live="polite"></p>
+            <ol id="route-steps" aria-label="Turn-by-turn directions"></ol>
+        </section>
+    </aside>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
     <script>
-        // Initialize map centered on Los Angeles
         const map = L.map('map').setView([34.0522, -118.2437], 13);
 
-        // Load OpenStreetMap tiles
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
-        // Click to drop a pin
-        map.on('click', function(e) {
-            const lat = e.latlng.lat.toFixed(4);
-            const lng = e.latlng.lng.toFixed(4);
-            
-            L.marker([e.latlng.lat, e.latlng.lng]).addTo(map)
-                .bindPopup(`<b>Location Marked</b><br>Lat: ${lat}, Lng: ${lng}`)
-                .openPopup();
+        const status = document.getElementById('status');
+        const points = [];
+        const markers = [];
+
+        let routeLine = null;
+        let searchMarker = null;
+        let routeStartMarker = null;
+        let searchedDestination = null;
+        let userStartLocation = null;
+
+        const redPinIcon = L.divIcon({
+            className: 'destination-pin',
+            html: '<svg viewBox="0 0 28 38" aria-hidden="true"><path fill="#d93025" stroke="#fff" stroke-width="2" d="M14 1C6.8 1 1 6.8 1 14c0 9 13 23 13 23s13-14 13-23C27 6.8 21.2 1 14 1z"/><circle cx="14" cy="14" r="4.5" fill="#fff"/></svg>',
+            iconSize: [28, 38],
+            iconAnchor: [14, 38],
+            popupAnchor: [0, -34]
+        });
+
+        function sanitizeAddress(value) {
+            return value.replace(/[^\p{L}\p{M}\p{N}\s,.'#\-/]/gu, '');
+        }
+
+        function selectSidebarTab(tabName) {
+            const showSearch = tabName === 'search';
+            document.getElementById('search-view').hidden = !showSearch;
+            document.getElementById('directions-view').hidden = showSearch;
+            document.getElementById('search-tab-button')
+                .setAttribute('aria-selected', String(showSearch));
+            document.getElementById('directions-tab-button')
+                .setAttribute('aria-selected', String(!showSearch));
+        }
+
+        function instructionFor(step) {
+            const maneuver = step.maneuver || {};
+            const street = step.name ? ` onto ${step.name}` : '';
+            const direction = maneuver.modifier ? ` ${maneuver.modifier}` : '';
+
+            const actions = {
+                depart: 'Start',
+                arrive: 'Arrive at your destination',
+                turn: `Turn${direction}`,
+                'end of road': `Turn${direction}`,
+                merge: `Merge${direction}`,
+                'on ramp': 'Take the ramp',
+                'off ramp': 'Take the exit',
+                fork: `Keep${direction}`,
+                continue: 'Continue',
+                'new name': 'Continue',
+                notification: 'Continue'
+            };
+
+            if (maneuver.type === 'roundabout' || maneuver.type === 'rotary') {
+                return `At the roundabout, take exit ${maneuver.exit || '?'}${street}`;
+            }
+
+            const action = actions[maneuver.type] || 'Continue';
+            return maneuver.type === 'arrive' ? action : `${action}${street}`;
+        }
+
+        function showRouteSteps(route) {
+            const list = document.getElementById('route-steps');
+            list.replaceChildren();
+
+            (route.legs || []).forEach(leg => {
+                (leg.steps || []).forEach(step => {
+                    const item = document.createElement('li');
+                    item.append(document.createTextNode(instructionFor(step)));
+
+                    const distance = document.createElement('span');
+                    distance.textContent = step.distance >= 1000
+                        ? `${(step.distance / 1000).toFixed(1)} km`
+                        : `${Math.round(step.distance)} m`;
+
+                    item.append(distance);
+                    list.append(item);
+                });
+            });
+
+            selectSidebarTab('directions');
+        }
+
+        document.getElementById('search-tab-button')
+            .addEventListener('click', () => selectSidebarTab('search'));
+
+        document.getElementById('directions-tab-button')
+            .addEventListener('click', () => {
+                selectSidebarTab('directions');
+                if (!userStartLocation && searchedDestination) {
+                    requestCurrentLocation(false);
+                }
+            });
+
+        document.querySelectorAll('#address, #start-address')
+            .forEach(input => {
+                input.addEventListener('input', () => {
+                    const cleaned = sanitizeAddress(input.value);
+                    if (cleaned !== input.value) input.value = cleaned;
+                });
+            });
+
+        function removeCurrentRoute() {
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+
+            if (routeStartMarker) {
+                map.removeLayer(routeStartMarker);
+                routeStartMarker = null;
+            }
+
+            // Manual route pins belong to that route and are removed with it.
+            markers.forEach(marker => map.removeLayer(marker));
+            markers.length = 0;
+            points.length = 0;
+
+            document.getElementById('route-info').style.display = 'none';
+            document.getElementById('route-steps').replaceChildren();
+            document.getElementById('directions-message').textContent = '';
+        }
+
+        document.getElementById('route-info-close')
+            .addEventListener('click', removeCurrentRoute);
+
+        async function geocodeAddress(address) {
+            const url = 'https://nominatim.openstreetmap.org/search' +
+                `?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`;
+
+            const response = await fetch(url, {
+                headers: { 'Accept': 'application/json' }
+            });
+
+            if (!response.ok) {
+                throw new Error(
+                    'Address search is temporarily unavailable. Please try again.'
+                );
+            }
+
+            const results = await response.json();
+            if (!results.length) return null;
+
+            return {
+                lat: Number(results[0].lat),
+                lon: Number(results[0].lon),
+                label: results[0].display_name || address
+            };
+        }
+
+        function clearActiveRoute() {
+            map.closePopup();
+            removeCurrentRoute();
+
+            if (searchMarker) {
+                map.removeLayer(searchMarker);
+                searchMarker = null;
+            }
+
+            document.getElementById('directions-message').textContent = '';
+            status.textContent = 'Click the map to choose a starting point.';
+        }
+
+        function showRoute(route) {
+            if (routeLine) map.removeLayer(routeLine);
+
+            const distanceKm = (route.distance / 1000).toFixed(1);
+            const minutes = Math.round(route.duration / 60);
+
+            document.getElementById('route-summary').textContent =
+                `${distanceKm} km · about ${minutes} min`;
+            document.getElementById('route-info').style.display = 'block';
+
+            routeLine = L.geoJSON(route.geometry, {
+                style: {
+                    color: '#1769e0',
+                    weight: 6,
+                    opacity: 0.85
+                }
+            }).addTo(map);
+
+            map.fitBounds(routeLine.getBounds(), { padding: [60, 60] });
+        }
+
+        document.getElementById('directions-button')
+            .addEventListener('click', () => {
+                selectSidebarTab('directions');
+                document.getElementById('start-address').focus();
+
+                if (!userStartLocation) {
+                    requestCurrentLocation(false);
+                }
+            });
+
+        function requestCurrentLocation(showStatus = true) {
+            const button = document.getElementById('use-location-button');
+            const message = document.getElementById('directions-message');
+
+            if (!navigator.geolocation) {
+                if (showStatus) {
+                    message.textContent =
+                        'Your browser does not support location access.';
+                }
+                return Promise.resolve(false);
+            }
+
+            button.disabled = true;
+
+            if (showStatus) {
+                message.textContent = 'Getting your location…';
+            }
+
+            return new Promise(resolve => {
+                navigator.geolocation.getCurrentPosition(
+                    position => {
+                        userStartLocation = {
+                            lat: position.coords.latitude,
+                            lon: position.coords.longitude,
+                            label: 'Your location'
+                        };
+
+                        document.getElementById('start-address').value =
+                            'Your location';
+
+                        if (showStatus) {
+                            message.textContent =
+                                'Your location is set as the starting point.';
+                        }
+
+                        button.disabled = false;
+                        resolve(true);
+                    },
+                    error => {
+                        if (showStatus) {
+                            message.textContent =
+                                error.code === error.PERMISSION_DENIED
+                                    ? 'Location permission was denied. Enter a starting address instead.'
+                                    : 'Could not get your location. Enter a starting address instead.';
+                        }
+
+                        button.disabled = false;
+                        resolve(false);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                );
+            });
+        }
+
+        document.getElementById('use-location-button')
+            .addEventListener('click', () => requestCurrentLocation(true));
+
+        document.getElementById('directions-form')
+            .addEventListener('submit', async event => {
+                event.preventDefault();
+
+                const input = document.getElementById('start-address');
+                const button = document.getElementById('find-button');
+                const message = document.getElementById('directions-message');
+                const startAddress = sanitizeAddress(input.value.trim());
+
+                if (!startAddress || !searchedDestination) return;
+
+                button.disabled = true;
+                message.textContent =
+                    'Finding locations and calculating route…';
+
+                try {
+                    const start =
+                        userStartLocation && startAddress === 'Your location'
+                            ? userStartLocation
+                            : await geocodeAddress(startAddress);
+
+                    if (!start) {
+                        message.textContent =
+                            `Starting address “${startAddress}” was not found. Check it and try again.`;
+                        return;
+                    }
+
+                    const coordinates =
+                        `${start.lon},${start.lat};${searchedDestination.lon},${searchedDestination.lat}`;
+                    const routeUrl =
+                        `https://router.project-osrm.org/route/v1/driving/${coordinates}` +
+                        '?overview=full&geometries=geojson&steps=true';
+
+                    const routeResponse = await fetch(routeUrl);
+
+                    if (!routeResponse.ok) {
+                        throw new Error(
+                            'Routing service is temporarily unavailable. Please try again.'
+                        );
+                    }
+
+                    const result = await routeResponse.json();
+
+                    if (result.code !== 'Ok' || !result.routes?.length) {
+                        throw new Error(
+                            'No drivable route was found between these locations.'
+                        );
+                    }
+
+                    if (searchMarker) searchMarker.closePopup();
+
+                    if (routeStartMarker) {
+                        map.removeLayer(routeStartMarker);
+                    }
+
+                    routeStartMarker = L.circleMarker(
+                        [start.lat, start.lon],
+                        {
+                            radius: 8,
+                            color: '#555',
+                            weight: 2,
+                            fillColor: '#999',
+                            fillOpacity: 1
+                        }
+                    ).addTo(map);
+
+                    showRoute(result.routes[0]);
+                    showRouteSteps(result.routes[0]);
+
+                    const distanceKm =
+                        (result.routes[0].distance / 1000).toFixed(1);
+                    const minutes =
+                        Math.round(result.routes[0].duration / 60);
+
+                    message.textContent =
+                        `Route: ${distanceKm} km · about ${minutes} min.`;
+                } catch (error) {
+                    message.textContent =
+                        error.message ||
+                        'Could not calculate the route. Please try again.';
+                } finally {
+                    button.disabled = false;
+                }
+            });
+
+        document.getElementById('address-form')
+            .addEventListener('submit', async event => {
+                event.preventDefault();
+
+                // A new destination search replaces any current route and pins.
+                clearActiveRoute();
+                searchedDestination = null;
+                document.getElementById('directions-button').hidden = true;
+                selectSidebarTab('search');
+
+                const input = document.getElementById('address');
+                const button = document.getElementById('search-button');
+                const message = document.getElementById('search-message');
+                const address = sanitizeAddress(input.value.trim());
+
+                input.value = address;
+
+                if (!address) {
+                    message.textContent = 'Enter an address to search.';
+                    return;
+                }
+
+                button.disabled = true;
+                message.textContent = 'Searching…';
+
+                try {
+                    const result = await geocodeAddress(address);
+
+                    if (!result) {
+                        message.textContent =
+                            `No results found for “${address}”. Check the spelling or try a nearby city.`;
+                        searchedDestination = null;
+                        document.getElementById('directions-button').hidden =
+                            true;
+                        return;
+                    }
+
+                    searchedDestination = result;
+                    userStartLocation = null;
+
+                    const location = L.latLng(result.lat, result.lon);
+                    map.setView(location, 16);
+
+                    if (searchMarker) {
+                        map.removeLayer(searchMarker);
+                    }
+
+                    searchMarker = L.marker(location, { icon: redPinIcon })
+                        .addTo(map)
+                        .bindPopup(
+                            `<b>Search result:</b><br>${result.label}`
+                        )
+                        .openPopup();
+
+                    message.textContent = `Found: ${result.label}`;
+                    document.getElementById('directions-button').hidden =
+                        false;
+                    selectSidebarTab('search');
+                } catch (error) {
+                    message.textContent =
+                        error.message ||
+                        'Could not search for that address. Please try again.';
+                } finally {
+                    button.disabled = false;
+                }
+            });
+
+        map.on('click', async event => {
+            // The first click of a new manual route replaces an address-based route.
+            if (points.length === 0 || points.length === 2) {
+                clearActiveRoute();
+                searchedDestination = null;
+                document.getElementById('directions-button').hidden = true;
+                selectSidebarTab('search');
+            }
+
+            const point = event.latlng;
+            points.push(point);
+
+            const label = points.length === 1 ? 'Start' : 'Destination';
+            const marker = points.length === 1
+                ? L.circleMarker(point, {
+                    radius: 8,
+                    color: '#555',
+                    weight: 2,
+                    fillColor: '#999',
+                    fillOpacity: 1
+                })
+                : L.marker(point, { icon: redPinIcon });
+
+            markers.push(
+                marker.addTo(map)
+                    .bindPopup(`<b>${label}</b>`)
+                    .openPopup()
+            );
+
+            if (points.length === 1) {
+                status.textContent =
+                    'Start selected. Click the map to choose a destination.';
+                return;
+            }
+
+            status.textContent = 'Finding a route…';
+
+            const [start, end] = points;
+            const coordinates =
+                `${start.lng},${start.lat};${end.lng},${end.lat}`;
+            const url =
+                `https://router.project-osrm.org/route/v1/driving/${coordinates}` +
+                '?overview=full&geometries=geojson&steps=true';
+
+            try {
+                const response = await fetch(url);
+
+                if (!response.ok) {
+                    throw new Error('Routing service unavailable.');
+                }
+
+                const result = await response.json();
+
+                if (result.code !== 'Ok' || !result.routes?.length) {
+                    throw new Error(
+                        'No drivable route found between these points.'
+                    );
+                }
+
+                showRoute(result.routes[0]);
+                showRouteSteps(result.routes[0]);
+
+                const distanceKm =
+                    (result.routes[0].distance / 1000).toFixed(1);
+                const minutes =
+                    Math.round(result.routes[0].duration / 60);
+
+                status.textContent =
+                    `Route: ${distanceKm} km · about ${minutes} min. ` +
+                    'Click again to choose a new pair.';
+            } catch (error) {
+                status.textContent =
+                    `${error.message} Click again to choose a new pair.`;
+            }
         });
     </script>
 </body>
